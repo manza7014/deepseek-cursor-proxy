@@ -1,201 +1,336 @@
-<!-- <h1><img src="assets/logo.png" width="120" alt="deepseek-cursor-proxy logo" style="vertical-align: middle;">&nbsp;DeepSeek Cursor Proxy</h1> -->
-<h1 align="center"><img src="assets/logo.png" width="150" alt="deepseek-cursor-proxy logo"><br>DeepSeek Cursor Proxy</h1>
+# DeepSeek Cursor Proxy 使用指南
 
-A compatibility proxy that connects Cursor to DeepSeek thinking models (`deepseek-v4-pro` and `deepseek-v4-flash`) by properly handling the `reasoning_content` field for DeepSeek tool-call reasoning API requests.
+> 解决 Cursor 中使用 DeepSeek 思考模型时 `reasoning_content` 缺失导致的 400 错误，通过代理 + ngrok 隧道实现 Cursor 与 DeepSeek API 的兼容。
 
-This proxy can also help **other applications and coding agents** beyond Cursor that run into the same missing `reasoning_content` issue with DeepSeek's thinking-mode API. Just point their API base URL at the proxy.
+---
 
-## What It Does
+## 架构说明
 
-- ✅ Injects `reasoning_content` into outgoing tool-call requests since Cursor does not include the field, restoring previously cached reasoning from regular and streamed DeepSeek responses. See [DeepSeek docs](https://api-docs.deepseek.com/guides/thinking_mode#tool-calls) for more details.
-- ✅ Displays DeepSeek's thinking tokens in Cursor by forwarding them into Cursor-visible collapsible Markdown `<details><summary>Thinking</summary>...</details>` blocks.
-- ✅ Starts an ngrok tunnel so Cursor can reach the local proxy through a public HTTPS URL.
-- ✅ Provides other compatibility fixes to make DeepSeek models run well in Cursor.
-
-## Why This Exists
-
-This repository fixes the following Cursor + DeepSeek tool-call error with thinking mode enabled:
-
-<img src="assets/error_400.png" width="600" alt="Error 400 - reasoning_content must be passed back">
-
-```txt
-⚠️ Connection Error
-Provider returned error:
-{
-  "error": {
-    "message": "The reasoning_content in the thinking mode must be passed back to the API.",
-    "type": "invalid_request_error",
-    "param": null,
-    "code": "invalid_request_error"
-  }
-}
+```
+Cursor → ngrok (HTTPS) → Proxy (localhost:9000) → DeepSeek API
 ```
 
-## Usage
+- **Proxy**：修复 `reasoning_content` 字段，使其兼容 DeepSeek 思考模式
+- **ngrok**：将本地代理暴露为公共 HTTPS 地址，Cursor 要求非 localhost 的 API URL
 
-### Step 1: Set Up ngrok
+---
 
-Cursor blocks non-public API URLs such as `localhost`, so the proxy needs a public HTTPS URL. [ngrok](https://ngrok.com/) can expose the local proxy to Cursor without opening router ports. Alternatively, you may use [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/setup/). Create an ngrok account and visit [ngrok's dashboard](https://dashboard.ngrok.com). You will find the authtoken and public URL there.
+## 安装与配置
 
-If you're using this proxy with another application that allows localhost API endpoints, you can skip this step entirely by setting `ngrok: false` in `~/.deepseek-cursor-proxy/config.yaml`, or by starting the proxy with `--no-ngrok`.
-
-<img src="assets/ngrok_dashboard.png" width="600" alt="ngrok dashboard">
-
-Then, install and authenticate ngrok once:
+### 1. 安装 ngrok
 
 ```bash
 brew install ngrok
-ngrok config add-authtoken <your-ngrok-token>
+ngrok config add-authtoken 3DkW2e1LOTXymu6tAO84ARvqNPW_26V6bbtGiYm5xNJ8QqFHJ
 ```
 
-### Step 2: Install and Start the Proxy Server
+> Authtoken 已配置完成，无需重复操作。
 
-**Run with UV**
+### 2. 克隆并安装代理
 
 ```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install and start
-# uv installs the program in .venv/ under the repo local folder
 git clone https://github.com/yxlao/deepseek-cursor-proxy.git
 cd deepseek-cursor-proxy
+```
+
+使用 uv 运行（推荐）：
+
+```bash
+# 如未安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装依赖并运行
 uv run deepseek-cursor-proxy
 ```
 
-**Run with Conda**
+首次运行会自动生成配置文件 `~/.deepseek-cursor-proxy/config.yaml`。
+
+### 3. 配置文件说明
+
+配置文件路径：`~/.deepseek-cursor-proxy/config.yaml`
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `base_url` | `https://api.deepseek.com` | DeepSeek API 地址 |
+| `model` | `deepseek-v4-pro` | 默认模型（回退用） |
+| `thinking` | `enabled` | 启用思考模式 |
+| `reasoning_effort` | `max` | 思考强度 |
+| `display_reasoning` | `true` | 在 Cursor 中显示思考过程 |
+| `ngrok` | `true` | 是否自动启动 ngrok |
+| `ngrok_url` | `null` | 固定 ngrok 域名（付费功能） |
+| `port` | `9000` | 代理本地端口 |
+| `verbose` | `false` | 调试日志开关 |
+| `request_timeout` | `300` | 请求超时时间（秒） |
+
+---
+
+## 使用步骤
+
+### Step 1: 启动 ngrok 隧道
 
 ```bash
-# Install conda if you don't have it
-# Follow: https://www.anaconda.com/docs/getting-started/miniconda/install/overview
-
-# Install
-conda create -n dcp python=3.10 -y
-conda activate dcp
-git clone https://github.com/yxlao/deepseek-cursor-proxy.git
-cd deepseek-cursor-proxy
-pip install -e .
-
-# Start
-deepseek-cursor-proxy
+ngrok http 9000
 ```
 
-When ngrok is enabled, `deepseek-cursor-proxy` will print the ngrok public URL on start. If it differs from the one in Cursor, update it in Cursor's Base URL field.
+ngrok URL 已固定为 `https://immortal-hatbox-earthworm.ngrok-free.dev`，重启后不会变化。
 
-If you use a **reserved ngrok endpoint or your own domain** (instead of a URL assigned by ngrok), pass it through to the ngrok agent as `--url=…`. Set `ngrok_url` in `~/.deepseek-cursor-proxy/config.yaml` or use `--ngrok-url` on the command line (see `ngrok http --help`). Example:
+### Step 2: 启动代理
+
+```bash
+cd /Users/liyongfeng/develop/work/deepseek-cursor-proxy
+
+# 方式一：使用管理脚本（推荐）
+./deepseek-cursor-proxy.sh start
+
+# 方式二：直接后台运行
+nohup .venv/bin/python -m deepseek_cursor_proxy.server --no-ngrok --port 9000 > /tmp/deepseek-proxy.log 2>&1 &
+```
+
+启动成功时会输出类似信息：
+
+```
+default_model: deepseek-v4-pro (thinking, max)
+public_tunnel: off
+local_base_url: http://127.0.0.1:9000/v1
+api_base_url: http://127.0.0.1:9000/v1
+```
+
+### Step 3: 验证服务是否正常
+
+```bash
+# 验证本地代理
+curl http://127.0.0.1:9000/v1/models
+
+# 验证 ngrok 公共 URL
+curl https://immortal-hatbox-earthworm.ngrok-free.dev/v1/models
+```
+
+两个命令均应返回 HTTP 200 及模型列表。
+
+### Step 4: 在 Cursor 中配置自定义模型
+
+打开 Cursor **Settings → Models → Add Custom Model**，填写：
+
+| 字段 | 值 |
+|------|-----|
+| **Model** | `deepseek-v4-pro` |
+| **API Key** | `sk-3d12cb96b2964457be60f34977b43e65` |
+| **Base URL** | `https://immortal-hatbox-earthworm.ngrok-free.dev/v1` |
+
+> 可选：可以添加 `deepseek-v4-flash` 模型，API Key 和 Base URL 相同。
+
+### Step 5: 开始使用
+
+1. 在 Cursor 的模型选择器中选择 `deepseek-v4-pro`
+2. 使用 Chat 或 Agent 模式发送消息
+3. 可以看到 DeepSeek 的思考过程（以 `<think>` 标签显示）
+4. 正常对话和代码生成功能可用
+
+---
+
+## 在 Cursor 中使用
+
+### 切换模型
+
+- 在 Chat/Agent 界面顶部选择 `deepseek-v4-pro`
+- macOS 快捷键 `Cmd+Shift+0` 可快速切换自定义 API 开关
+
+### 注意事项
+
+- **思考过程显示**：思考过程会以 `<think>...</think>` 标签形式显示在 Cursor 中，如果觉得干扰，可在配置中关闭：
 
 ```yaml
-ngrok: true
-ngrok_url: https://your-subdomain.ngrok.dev
+display_reasoning: false
 ```
+
+- **上下文缓存**：代理会自动缓存 `reasoning_content`，避免重复消耗 token。切换对话或重启代理后首次请求可能需要多等待几秒
+
+- **模型选择**：根据需求选择：
+  - `deepseek-v4-pro`：更强推理能力，适合复杂任务
+  - `deepseek-v4-flash`：更快响应，适合简单对话
+
+---
+
+## 快速管理（推荐）
+
+项目目录下提供了 `deepseek-cursor-proxy.sh` 管理脚本，一条命令管理所有服务：
 
 ```bash
-deepseek-cursor-proxy --ngrok-url https://your-subdomain.ngrok.dev
+cd /Users/liyongfeng/develop/work/deepseek-cursor-proxy
+
+# 启动（同时启动代理 + ngrok）
+./deepseek-cursor-proxy.sh start
+
+# 查看运行状态
+./deepseek-cursor-proxy.sh status
+
+# 停止
+./deepseek-cursor-proxy.sh stop
+
+# 重启
+./deepseek-cursor-proxy.sh restart
 ```
 
-On the first run, `deepseek-cursor-proxy` will create:
+输出示例：
 
-- `~/.deepseek-cursor-proxy/config.yaml`: the configuration file
-- `~/.deepseek-cursor-proxy/reasoning_content.sqlite3`: the reasoning content cache
+```
+=== 运行状态 ===
+  代理: ✅ 运行中
+  ngrok: ✅ 运行中 → https://immortal-hatbox-earthworm.ngrok-free.dev
+```
 
-Persistent settings live in `~/.deepseek-cursor-proxy/config.yaml`. You can also override the config with command-line flags, for example:
+> 代理的 PID、日志路径等无需关心，脚本已自动管理。
+
+---
+
+## 开机自启（推荐）
+
+设置后每次登录自动启动代理和 ngrok，无需手动操作。
+
+### 启用开机自启
 
 ```bash
-# Hide thinking tokens displaying in Cursor UI
-deepseek-cursor-proxy --no-display-reasoning
-
-# Show full incoming and outgoing requests
-deepseek-cursor-proxy --verbose
-
-# Run without ngrok (run on localhost directly)
-deepseek-cursor-proxy --no-ngrok
-
-# Use a fixed ngrok public URL (reserved endpoint / custom domain)
-deepseek-cursor-proxy --ngrok-url https://your-subdomain.ngrok.dev
-
-# Use a different local port
-deepseek-cursor-proxy --port 9000
+cd /Users/liyongfeng/develop/work/deepseek-cursor-proxy
+./deepseek-cursor-proxy.sh enable
 ```
 
-### Step 3: Add Cursor Custom Model
-
-In Cursor, add the DeepSeek custom model and point it at this proxy:
-
-- Model: `deepseek-v4-pro`
-- API Key: your DeepSeek API key
-- Base URL: your ngrok HTTPS URL with the `/v1` API version path
-
-The proxy respects the DeepSeek model name Cursor sends, such as `deepseek-v4-pro` or `deepseek-v4-flash`. The `model` field in `config.yaml` is used as a fallback only when a request does not include a model.
-
-For example, if ngrok dashboard shows `https://example.ngrok-free.dev`, use:
-
-```text
-https://example.ngrok-free.dev/v1
-```
-
-<img src="assets/cursor_config.png" width="600" alt="Cursor settings for DeepSeek through the proxy">
-
-Note: you can toggle the custom API on and off with:
-
-- macOS: `Cmd+Shift+0`
-- Windows/Linux: `Ctrl+Shift+0`
-
-### Step 4: Chat with DeepSeek in Cursor
-
-Select `deepseek-v4-pro` in Cursor and use chat or agent mode as usual.
-
-<img src="assets/cursor_chat.png" width="480" alt="Chatting with DeepSeek in Cursor">
-
-## How It Works
-
-- **Core fix:** DeepSeek [thinking-mode tool calls](https://api-docs.deepseek.com/guides/thinking_mode#tool-calls) require the complete **multi-round** `reasoning_content` chain to be sent back in later requests. Cursor omits that field, causing a 400 error. The proxy (`Cursor -> ngrok -> proxy -> DeepSeek API`) stores DeepSeek's original `reasoning_content` and patches missing blocks back into outgoing tool-call history.
-- **Multi-conversation isolation:** To avoid collisions across concurrent conversations, the proxy scopes cache keys by a SHA-256 hash of the canonical conversation prefix (roles, content, and tool calls, excluding `reasoning_content`) plus the upstream model, configuration, and an API-key hash. Different threads get different scopes, so reused tool-call IDs do not collide. Byte-identical cloned histories produce identical scopes.
-- **Context caching compatibility:** The proxy preserves compatibility by never injecting synthetic thread IDs, timestamps, or cache-control messages. It restores `reasoning_content` as the exact original string, so repeated prefixes remain intact for [DeepSeek context cache](https://api-docs.deepseek.com/guides/kv_cache). Cache hit rates are logged in the terminal output.
-- **Additional compatibility fixes:** Beyond reasoning repair, the proxy converts legacy `functions`/`function_call` fields to `tools`/`tool_choice`, preserves required and named tool-choice semantics, normalizes `reasoning_effort` aliases, strips mirrored thinking display blocks from assistant content, flattens multi-part content arrays to plain text, and mirrors `reasoning_content` into Cursor-visible Markdown details blocks.
-
-## Development
-
-Run unit tests:
+### 取消开机自启
 
 ```bash
-uv run python -m unittest discover -s tests
+./deepseek-cursor-proxy.sh disable
 ```
 
-Run pre-commit hooks (code formatting and linting):
+### 手动管理（备选）
+
+如果 `./deepseek-cursor-proxy.sh enable` 在终端中提示加载失败，请手动执行：
 
 ```bash
-uv sync --dev
-uv run pre-commit run --all-files
+launchctl load ~/Library/LaunchAgents/com.deepseek.proxy.plist
 ```
 
-## Debugging
-
-Run with verbose output:
+取消自启：
 
 ```bash
-deepseek-cursor-proxy --verbose
+launchctl unload ~/Library/LaunchAgents/com.deepseek.proxy.plist
 ```
 
-Run without ngrok for local curl testing:
+---
+
+## 原始管理命令
+
+如果不想使用 `deepseek-cursor-proxy.sh`，也可以直接使用以下命令：
+
+### 查看运行状态
 
 ```bash
-deepseek-cursor-proxy --no-ngrok --port 9000 --verbose
+# 查看代理进程
+ps aux | grep deepseek_cursor_proxy
+
+# 查看 ngrok 进程
+ps aux | grep ngrok
+
+# 查看代理日志
+cat /tmp/deepseek-proxy.log
+
+# 查看 ngrok 隧道状态（通过 API）
+curl http://127.0.0.1:4040/api/tunnels
 ```
 
-Capture full structured request traces for debugging:
+### 停止服务
 
 ```bash
-deepseek-cursor-proxy --verbose --trace-dir ./trace-dumps
+# 停止代理
+lsof -ti :9000 | xargs kill
+
+# 停止 ngrok
+pkill ngrok
 ```
 
-Use another config file:
+### 后台启动
 
 ```bash
-deepseek-cursor-proxy --config ./dev.config.yaml
+# 启动代理
+cd /Users/liyongfeng/develop/work/deepseek-cursor-proxy
+nohup .venv/bin/python -m deepseek_cursor_proxy.server --no-ngrok --port 9000 > /tmp/deepseek-proxy.log 2>&1 &
+
+# 启动 ngrok
+nohup ngrok http 9000 > /tmp/ngrok.log 2>&1 &
 ```
 
-Clear the local reasoning cache:
+---
+
+## 注意事项
+
+### 1. ngrok 域名
+
+ngrok 域名 `https://immortal-hatbox-earthworm.ngrok-free.dev` 已固定，重启后不会变化。在 [ngrok Dashboard](https://dashboard.ngrok.com/) 中可以查看你的域名。
+
+### 2. 代理端口冲突
+
+如果 9000 端口被占用，可修改配置或使用其他端口：
 
 ```bash
-deepseek-cursor-proxy --clear-reasoning-cache
+# 使用其他端口启动
+uv run deepseek-cursor-proxy --port 9001
+
+# 或修改配置文件
+# ~/.deepseek-cursor-proxy/config.yaml
+port: 9001
 ```
+
+### 3. 第一个请求可能较慢
+
+首次启动代理后，第一个请求需要初始化缓存，响应时间可能较长。后续请求会利用缓存加速。
+
+### 4. Token 消耗
+
+思考模式会消耗较多 token（显示为 reasoning tokens），注意监控 DeepSeek API 使用量。
+
+### 5. 清除推理缓存
+
+如果需要清除缓存的 `reasoning_content`：
+
+```bash
+cd /Users/liyongfeng/develop/work/deepseek-cursor-proxy
+uv run deepseek-cursor-proxy --clear-reasoning-cache
+```
+
+### 6. 调试模式
+
+遇到问题时开启 verbose 日志：
+
+```bash
+uv run deepseek-cursor-proxy --verbose
+```
+
+---
+
+## 常见问题
+
+### Q: 连接错误 `Provider returned error`
+
+确保 ngrok 服务正常运行，且 Cursor 中的 Base URL 与 ngrok 分配的 URL 一致。
+
+### Q: 代理启动失败 `Address already in use`
+
+端口被占用，结束占用进程或更换端口：
+
+```bash
+lsof -ti :9000 | xargs kill -9
+```
+
+### Q: ngrok 隧道指向错误的端口
+
+检查 ngrok 启动命令，确保 `ngrok http 9000` 中的端口与代理端口一致。
+
+### Q: Cursor 报错 `reasoning_content must be passed back`
+
+代理未正常工作。检查代理进程是否在运行，以及是否需要更新代理版本。
+
+---
+
+## 参考链接
+
+- [DeepSeek Cursor Proxy GitHub](https://github.com/yxlao/deepseek-cursor-proxy)
+- [DeepSeek API 文档 - 思考模式](https://api-docs.deepseek.com/guides/thinking_mode)
+- [ngrok 官网](https://ngrok.com/)
