@@ -11,12 +11,29 @@ NGROK_LOG="/tmp/ngrok.log"
 start() {
     echo "=== 启动 DeepSeek Cursor Proxy ==="
 
+    PORT_PID=$(lsof -ti :9000 2>/dev/null)
+    if [ -n "$PORT_PID" ]; then
+        if ! pgrep -f "deepseek_cursor_proxy.server" | grep -q "$PORT_PID"; then
+            echo "  [!] 端口 9000 被残留进程占用 (PID: $PORT_PID)，正在释放..."
+            kill -9 "$PORT_PID" 2>/dev/null
+            sleep 0.5
+        fi
+    fi
+
     if pgrep -f "deepseek_cursor_proxy.server" > /dev/null 2>&1; then
         echo "  [✓] 代理已在运行"
     else
         cd "$PROXY_DIR" || exit 1
         nohup .venv/bin/python -m deepseek_cursor_proxy.server --no-ngrok --port 9000 > "$PROXY_LOG" 2>&1 &
-        echo "  [✓] 代理已启动 (PID: $!)"
+        PROXY_PID=$!
+        sleep 0.5
+        if kill -0 "$PROXY_PID" 2>/dev/null; then
+            echo "  [✓] 代理已启动 (PID: $PROXY_PID)"
+        else
+            echo "  [✗] 代理启动失败，错误日志："
+            tail -5 "$PROXY_LOG"
+            return 1
+        fi
     fi
 
     if pgrep -x "ngrok" > /dev/null 2>&1; then
